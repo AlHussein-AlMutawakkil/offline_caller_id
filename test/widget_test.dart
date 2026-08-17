@@ -5,6 +5,7 @@ import 'package:offline_caller_id/app/app.dart';
 void main() {
   testWidgets('يعرض التطبيق شاشة البحث والاستيراد', (tester) async {
     await tester.pumpWidget(const OfflineCallerIdApp());
+    await tester.pumpAndSettle();
 
     expect(find.text('كاشف الأرقام أوف لاين'), findsOneWidget);
     expect(find.text('عدد السجلات: 0'), findsOneWidget);
