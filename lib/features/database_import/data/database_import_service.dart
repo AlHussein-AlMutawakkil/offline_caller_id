@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/constants/database_constants.dart';
@@ -36,10 +35,7 @@ class DatabaseImportService {
     );
 
     final selectedPath = result?.files.single.path;
-    if (selectedPath == null || selectedPath.isEmpty) {
-      return null;
-    }
-
+    if (selectedPath == null || selectedPath.isEmpty) return null;
     return File(selectedPath);
   }
 
@@ -72,9 +68,7 @@ class DatabaseImportService {
     final backupFile = File(backupPath);
 
     await temporaryFile.parent.create(recursive: true);
-    if (await temporaryFile.exists()) {
-      await temporaryFile.delete();
-    }
+    if (await temporaryFile.exists()) await temporaryFile.delete();
 
     yield DatabaseImportProgress(
       copiedBytes: 0,
@@ -98,13 +92,8 @@ class DatabaseImportService {
       await _validateDatabase(temporaryPath);
       await closeCurrentDatabase();
 
-      if (await backupFile.exists()) {
-        await backupFile.delete();
-      }
-      if (await targetFile.exists()) {
-        await targetFile.rename(backupPath);
-      }
-
+      if (await backupFile.exists()) await backupFile.delete();
+      if (await targetFile.exists()) await targetFile.rename(backupPath);
       await temporaryFile.rename(targetPath);
 
       yield DatabaseImportProgress(
@@ -113,9 +102,7 @@ class DatabaseImportService {
         message: 'تم استيراد قاعدة البيانات بنجاح.',
       );
     } catch (error) {
-      if (await temporaryFile.exists()) {
-        await temporaryFile.delete();
-      }
+      if (await temporaryFile.exists()) await temporaryFile.delete();
       throw DatabaseImportException('فشل استيراد قاعدة البيانات: $error');
     }
   }
@@ -136,9 +123,7 @@ class DatabaseImportService {
         final remaining = totalBytes - copiedBytes;
         final chunkSize = remaining < maxChunkSize ? remaining : maxChunkSize;
         final chunk = await input.read(chunkSize);
-        if (chunk.isEmpty) {
-          break;
-        }
+        if (chunk.isEmpty) break;
 
         await output.writeFrom(chunk);
         copiedBytes += chunk.length;
@@ -180,7 +165,6 @@ class DatabaseImportService {
           .map((column) => column['name']?.toString())
           .whereType<String>()
           .toSet();
-
       final required = {
         DatabaseConstants.phoneColumn,
         DatabaseConstants.namesColumn,
