@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../../core/constants/database_constants.dart';
+import '../../../../core/utils/phone_normalizer.dart';
 
 class CallerDatabaseDataSource {
   final Database database;
@@ -8,10 +9,13 @@ class CallerDatabaseDataSource {
   const CallerDatabaseDataSource(this.database);
 
   Future<List<Map<String, Object?>>> searchByNumber(String number) {
+    final normalized = PhoneNormalizer.normalize(number);
+    if (normalized.isEmpty) return Future.value(const []);
+
     return database.query(
       DatabaseConstants.tableName,
       where: '${DatabaseConstants.phoneColumn} LIKE ?',
-      whereArgs: ['$number%'],
+      whereArgs: ['$normalized%'],
       limit: DatabaseConstants.maxSearchResults,
     );
   }
@@ -20,12 +24,18 @@ class CallerDatabaseDataSource {
     String name, {
     String? companyPrefix,
   }) {
-    var where = '${DatabaseConstants.namesColumn} LIKE ?';
-    final args = <Object?>['$name%'];
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) return Future.value(const []);
 
-    if (companyPrefix != null && companyPrefix.isNotEmpty) {
+    var where = '${DatabaseConstants.namesColumn} LIKE ?';
+    final args = <Object?>['$normalizedName%'];
+
+    final normalizedPrefix = companyPrefix == null
+        ? ''
+        : PhoneNormalizer.normalize(companyPrefix);
+    if (normalizedPrefix.isNotEmpty) {
       where += ' AND ${DatabaseConstants.phoneColumn} LIKE ?';
-      args.add('$companyPrefix%');
+      args.add('$normalizedPrefix%');
     }
 
     return database.query(

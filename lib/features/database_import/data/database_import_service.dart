@@ -51,6 +51,36 @@ class DatabaseImportService {
     return File(selectedPath);
   }
 
+  Future<void> deleteImportedDatabase() async {
+    await closeCurrentDatabase();
+    final databaseDirectory = await getDatabasesPath();
+    final fileNames = [
+      DatabaseConstants.databaseName,
+      '${DatabaseConstants.databaseName}.ready',
+      '${DatabaseConstants.databaseName}.backup',
+      '${DatabaseConstants.databaseName}.importing',
+    ];
+    for (final fileName in fileNames) {
+      final file = File(path.join(databaseDirectory, fileName));
+      if (await file.exists()) await file.delete();
+    }
+  }
+
+  Future<bool> hasImportedDatabase() async {
+    final databaseDirectory = await getDatabasesPath();
+    final databaseFile = File(
+      path.join(databaseDirectory, DatabaseConstants.databaseName),
+    );
+    final markerFile = File(
+      path.join(
+        databaseDirectory,
+        '${DatabaseConstants.databaseName}.ready',
+      ),
+    );
+
+    return await databaseFile.exists() && await markerFile.exists();
+  }
+
   Stream<DatabaseImportProgress> importFile(File sourceFile) async* {
     if (!await sourceFile.exists()) {
       throw const DatabaseImportException('ملف قاعدة البيانات غير موجود.');
@@ -74,10 +104,15 @@ class DatabaseImportService {
       databasesDirectory,
       '${DatabaseConstants.databaseName}.backup',
     );
+    final markerPath = path.join(
+      databasesDirectory,
+      '${DatabaseConstants.databaseName}.ready',
+    );
 
     final temporaryFile = File(temporaryPath);
     final targetFile = File(targetPath);
     final backupFile = File(backupPath);
+    final markerFile = File(markerPath);
 
     await temporaryFile.parent.create(recursive: true);
     if (await temporaryFile.exists()) await temporaryFile.delete();
@@ -107,6 +142,7 @@ class DatabaseImportService {
       if (await backupFile.exists()) await backupFile.delete();
       if (await targetFile.exists()) await targetFile.rename(backupPath);
       await temporaryFile.rename(targetPath);
+      await markerFile.writeAsString(DateTime.now().toIso8601String());
 
       yield DatabaseImportProgress(
         copiedBytes: sourceLength,

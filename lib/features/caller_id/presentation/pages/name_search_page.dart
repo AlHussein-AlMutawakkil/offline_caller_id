@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 
-import '../../../../core/constants/app_constants.dart';
-import '../../domain/entities/contact_record.dart';
-import '../controllers/caller_id_controller.dart';
+import '../../../telecom_companies/presentation/telecom_companies_controller.dart';
+import '../controllers/name_search_controller.dart';
 
 class NameSearchPage extends StatefulWidget {
-  final CallerIdController controller;
+  final NameSearchController controller;
+  final TelecomCompaniesController companiesController;
 
-  const NameSearchPage({required this.controller, super.key});
+  const NameSearchPage({
+    required this.controller,
+    required this.companiesController,
+    super.key,
+  });
 
   @override
   State<NameSearchPage> createState() => _NameSearchPageState();
@@ -15,7 +19,7 @@ class NameSearchPage extends StatefulWidget {
 
 class _NameSearchPageState extends State<NameSearchPage> {
   final _searchController = TextEditingController();
-  String _selectedCompany = 'الكل';
+  String? _selectedCompany;
 
   @override
   void dispose() {
@@ -25,10 +29,12 @@ class _NameSearchPageState extends State<NameSearchPage> {
 
   Future<void> _search() async {
     FocusScope.of(context).unfocus();
-    final prefix = _selectedCompany == 'الكل'
-        ? null
-        : AppConstants.companyPrefixes[_selectedCompany];
-    await widget.controller.searchName(
+    final active = widget.companiesController.activeCompanies;
+    final selected = active.where(
+      (company) => company.name == _selectedCompany,
+    );
+    final prefix = selected.isEmpty ? null : selected.first.prefix;
+    await widget.controller.search(
       _searchController.text,
       companyPrefix: prefix,
     );
@@ -37,62 +43,76 @@ class _NameSearchPageState extends State<NameSearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = widget.controller;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 15, 20, 10),
-          child: Column(
-            children: [
-              DropdownButtonFormField<String>(
-                value: _selectedCompany,
-                decoration: const InputDecoration(
-                  labelText: 'اختر شركة الاتصالات',
-                ),
-                items: AppConstants.companies
-                    .map(
-                      (company) => DropdownMenuItem(
-                        value: company,
-                        child: Text(company),
+    return AnimatedBuilder(
+      animation: widget.companiesController,
+      builder: (context, _) {
+        final activeCompanies = widget.companiesController.activeCompanies;
+        final selectedExists = activeCompanies.any(
+          (company) => company.name == _selectedCompany,
+        );
+        if (!selectedExists) _selectedCompany = null;
+
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 15, 20, 10),
+              child: Column(
+                children: [
+                  DropdownButtonFormField<String?>(
+                    value: _selectedCompany,
+                    decoration: const InputDecoration(
+                      labelText: 'اختر شركة الاتصالات',
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('الكل'),
                       ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value == null) return;
-                  setState(() => _selectedCompany = value);
-                },
+                      ...activeCompanies.map(
+                        (company) => DropdownMenuItem<String?>(
+                          value: company.name,
+                          child: Text(company.name),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setState(() => _selectedCompany = value);
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _searchController,
+                    textAlign: TextAlign.center,
+                    decoration: const InputDecoration(
+                      hintText: 'أدخل الاسم هنا',
+                      prefixIcon: Icon(Icons.person_search),
+                    ),
+                    onSubmitted: (_) => _search(),
+                  ),
+                  const SizedBox(height: 15),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: FilledButton.icon(
+                      onPressed:
+                          widget.controller.isLoading ? null : _search,
+                      icon: const Icon(Icons.search),
+                      label: const Text('بحث بالاسم'),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _searchController,
-                textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                  hintText: 'أدخل الاسم هنا',
-                  prefixIcon: Icon(Icons.person_search),
-                ),
-                onSubmitted: (_) => _search(),
-              ),
-              const SizedBox(height: 15),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: FilledButton.icon(
-                  onPressed: controller.isLoading ? null : _search,
-                  icon: const Icon(Icons.search),
-                  label: const Text('بحث بالاسم'),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(child: _NameResults(controller: controller)),
-      ],
+            ),
+            Expanded(child: _NameResults(controller: widget.controller)),
+          ],
+        );
+      },
     );
   }
 }
 
 class _NameResults extends StatelessWidget {
-  final CallerIdController controller;
+  final NameSearchController controller;
 
   const _NameResults({required this.controller});
 
@@ -113,29 +133,60 @@ class _NameResults extends StatelessWidget {
       itemCount: controller.results.length,
       itemBuilder: (context, index) {
         final record = controller.results[index];
-        return _NameResultCard(record: record);
+        final names = record.namesList;
+        final matchedName = _extractMatchingName(names, controller.lastQuery);
+        final hasMultipleNames = names.length > 1;
+
+        return InkWell(
+          onTap: hasMultipleNames
+              ? () => _showNamesDialog(context, record.phone, names)
+              : null,
+          child: Card(
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            child: ListTile(
+              leading: Icon(
+                hasMultipleNames
+                    ? Icons.keyboard_arrow_down
+                    : Icons.person,
+                color: Colors.grey,
+              ),
+              title: Text(matchedName, textAlign: TextAlign.center),
+              subtitle: Text(record.phone, textAlign: TextAlign.center),
+            ),
+          ),
+        );
       },
     );
   }
-}
 
-class _NameResultCard extends StatelessWidget {
-  final ContactRecord record;
+  String _extractMatchingName(List<String> names, String query) {
+    final normalizedQuery = query.trim().toLowerCase();
+    return names.firstWhere(
+      (name) => name.toLowerCase().contains(normalizedQuery),
+      orElse: () => names.first,
+    );
+  }
 
-  const _NameResultCard({required this.record});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      child: ListTile(
-        title: Text(
-          record.namesList.join('، '),
-          textAlign: TextAlign.center,
-        ),
-        subtitle: Text(
-          record.phone,
-          textAlign: TextAlign.center,
+  void _showNamesDialog(
+    BuildContext context,
+    String phone,
+    List<String> names,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('الأسماء المتعلقة بـ $phone'),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.6,
+          ),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: names.length,
+            itemBuilder: (context, index) => ListTile(
+              title: Text(names[index], textAlign: TextAlign.right),
+            ),
+          ),
         ),
       ),
     );

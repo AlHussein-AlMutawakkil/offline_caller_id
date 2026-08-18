@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../domain/entities/contact_record.dart';
-import '../controllers/caller_id_controller.dart';
+import '../controllers/number_search_controller.dart';
 
 class NumberSearchPage extends StatefulWidget {
-  final CallerIdController controller;
+  final NumberSearchController controller;
 
   const NumberSearchPage({required this.controller, super.key});
 
@@ -23,7 +22,7 @@ class _NumberSearchPageState extends State<NumberSearchPage> {
 
   Future<void> _search() async {
     FocusScope.of(context).unfocus();
-    await widget.controller.searchNumber(_searchController.text);
+    await widget.controller.search(_searchController.text);
     if (mounted) setState(() {});
   }
 
@@ -67,7 +66,7 @@ class _NumberSearchPageState extends State<NumberSearchPage> {
 }
 
 class _ResultsList extends StatelessWidget {
-  final CallerIdController controller;
+  final NumberSearchController controller;
 
   const _ResultsList({required this.controller});
 
@@ -83,20 +82,39 @@ class _ResultsList extends StatelessWidget {
       return const Center(child: Text('لا توجد نتائج لعرضها حاليًا'));
     }
 
+    final items = <_NumberResult>[];
+    for (final record in controller.results) {
+      final names = record.namesList;
+      if (names.isEmpty) {
+        items.add(_NumberResult(name: 'بدون اسم', phone: record.phone));
+      } else {
+        for (final name in names) {
+          items.add(_NumberResult(name: name, phone: record.phone));
+        }
+      }
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.only(top: 8, bottom: 16),
-      itemCount: controller.results.length,
+      itemCount: items.length,
       itemBuilder: (context, index) {
-        return _ContactCard(record: controller.results[index]);
+        return _ContactCard(item: items[index]);
       },
     );
   }
 }
 
-class _ContactCard extends StatelessWidget {
-  final ContactRecord record;
+class _NumberResult {
+  final String name;
+  final String phone;
 
-  const _ContactCard({required this.record});
+  const _NumberResult({required this.name, required this.phone});
+}
+
+class _ContactCard extends StatelessWidget {
+  final _NumberResult item;
+
+  const _ContactCard({required this.item});
 
   @override
   Widget build(BuildContext context) {
@@ -104,8 +122,8 @@ class _ContactCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
       child: ListTile(
         leading: const CircleAvatar(child: Icon(Icons.person)),
-        title: Text(record.namesList.join('، ')),
-        subtitle: Text(record.phone),
+        title: Text(item.name),
+        subtitle: Text(item.phone),
       ),
     );
   }

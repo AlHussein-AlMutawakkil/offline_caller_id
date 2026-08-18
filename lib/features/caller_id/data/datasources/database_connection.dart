@@ -8,9 +8,7 @@ class DatabaseConnection {
 
   Future<Database> get database async {
     final current = _database;
-    if (current != null && current.isOpen) {
-      return current;
-    }
+    if (current != null && current.isOpen) return current;
 
     final databasesPath = await getDatabasesPath();
     final databasePath = path.join(
@@ -30,10 +28,23 @@ class DatabaseConnection {
             ${DatabaseConstants.companyColumn} TEXT
           )
         ''');
+        await _ensureIndexes(db);
       },
+      onOpen: _ensureIndexes,
     );
 
     return _database!;
+  }
+
+  Future<void> _ensureIndexes(Database db) async {
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_${DatabaseConstants.tableName}_phone
+      ON ${DatabaseConstants.tableName} (${DatabaseConstants.phoneColumn})
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_${DatabaseConstants.tableName}_names
+      ON ${DatabaseConstants.tableName} (${DatabaseConstants.namesColumn})
+    ''');
   }
 
   Future<void> close() async {
