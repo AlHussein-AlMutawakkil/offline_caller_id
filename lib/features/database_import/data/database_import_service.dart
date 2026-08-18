@@ -8,6 +8,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../../core/constants/database_constants.dart';
 import '../../../core/errors/database_import_exception.dart';
+import '../../caller_id/data/datasources/caller_database_index_manager.dart';
 
 class DatabaseImportProgress {
   final int copiedBytes;
@@ -299,11 +300,15 @@ class DatabaseImportService {
     }
   }
 
+  /// يتحقق من مخطط القاعدة المستوردة وينشئ فهارس البحث قبل أن تُفتح لاحقًا
+  /// للقراءة فقط. إنشاء الفهرس هنا ضروري لأن [DatabaseConnection] يفتح
+  /// القاعدة النهائية بوضع readOnly، والذي لا يسمح بتنفيذ CREATE INDEX.
   Future<void> _validateDatabase(String databasePath) async {
     Database? database;
     try {
-      database = await openDatabase(databasePath, readOnly: true);
+      database = await openDatabase(databasePath);
       await _validateSchema(database);
+      await CallerDatabaseIndexManager.ensureSearchIndexes(database);
     } finally {
       await database?.close();
     }

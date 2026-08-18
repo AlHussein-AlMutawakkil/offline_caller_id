@@ -11,6 +11,14 @@ void main() {
     test('يوحد صيغة 00967', () {
       expect(PhoneNormalizer.normalize('00967 71 222 333'), '71222333');
     });
+
+    test('يوحد صيغة 967 بدون + أو 00 (تُسلّم من بعض الأجهزة)', () {
+      expect(PhoneNormalizer.normalize('967771234567'), '771234567');
+    });
+
+    test('لا يقص رقمًا محليًا قصيرًا يبدأ بـ967 خطأً', () {
+      expect(PhoneNormalizer.normalize('967123456'), '967123456');
+    });
   });
 
   test('يفصل ContactRecord الأسماء المتعددة دون عناصر فارغة', () {
