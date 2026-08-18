@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../../app/app_drawer.dart';
@@ -18,6 +20,7 @@ import '../../data/datasources/database_connection.dart';
 import '../controllers/name_search_controller.dart';
 import '../controllers/number_search_controller.dart';
 import '../controllers/search_controllers_bundle.dart';
+import '../widgets/database_open_error_view.dart';
 import 'name_search_page.dart';
 import 'number_search_page.dart';
 
@@ -54,11 +57,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<SearchControllersBundle> _createSearchControllers() async {
-    final database = await _databaseConnection.database;
-    final dataSource = CallerDatabaseDataSource(database);
+    await _databaseConnection.database;
+    final dataSource =
+        CallerDatabaseDataSource.fromConnection(_databaseConnection);
     final numberController = NumberSearchController.fromDataSource(dataSource);
     final nameController = NameSearchController.fromDataSource(dataSource);
-    await numberController.loadCount();
+    unawaited(numberController.loadCount());
     return SearchControllersBundle(
       number: numberController,
       name: nameController,
@@ -72,6 +76,11 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  Future<int> _refreshSearchControllersAndGetCount() async {
+    _refreshSearchControllers();
+    return (await _searchControllersFuture).number.totalRecords;
+  }
+
   Future<void> _openDrawerItem(String item) async {
     if (item == 'home') return;
     if (mounted && Navigator.of(context).canPop()) {
@@ -80,7 +89,11 @@ class _HomePageState extends State<HomePage> {
 
     if (item == 'permissions') {
       await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const PermissionsPage()),
+        MaterialPageRoute(
+          builder: (_) => PermissionsPage(
+            settingsController: widget.settingsController,
+          ),
+        ),
       );
       return;
     }
@@ -106,14 +119,19 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (item == 'database') {
-      final controllers = await _searchControllersFuture;
+      var totalRecords = 0;
+      try {
+        totalRecords = (await _searchControllersFuture).number.totalRecords;
+      } catch (_) {
+        // يمكن فتح صفحة الإدارة حتى عند تعذر فتح قاعدة البحث الحالية.
+      }
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => DatabaseManagementPage(
             controller: _importController,
-            totalRecords: controllers.number.totalRecords,
-            onDatabaseChanged: _refreshSearchControllers,
+            totalRecords: totalRecords,
+            onDatabaseChanged: _refreshSearchControllersAndGetCount,
           ),
         ),
       );
@@ -130,15 +148,13 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= 900;
-          return DefaultTabController(
-            length: 2,
-            child: Scaffold(
-              drawer: isWide
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 900;
+        return DefaultTabController(
+          length: 2,
+          child: Scaffold(
+            drawer: isWide
                 ? null
                 : AppDrawer(
                     currentItem: 'home',
@@ -160,23 +176,22 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             ),
-              body: Row(
-                children: [
-                  if (isWide)
-                    SizedBox(
-                      width: 280,
-                      child: AppDrawer(
-                        currentItem: 'home',
-                        onSelected: _openDrawerItem,
-                      ),
+            body: Row(
+              children: [
+                if (isWide)
+                  SizedBox(
+                    width: 280,
+                    child: AppDrawer(
+                      currentItem: 'home',
+                      onSelected: _openDrawerItem,
                     ),
-                  Expanded(child: _buildSearchContent(isWide)),
-                ],
-              ),
+                  ),
+                Expanded(child: _buildSearchContent(isWide)),
+              ],
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -184,8 +199,36 @@ class _HomePageState extends State<HomePage> {
     return FutureBuilder<SearchControllersBundle>(
       future: _searchControllersFuture,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return AnimatedBuilder(
+            animation: _importController,
+            builder: (context, _) {
+              if (!_importController.hasImportedDatabase) {
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 620),
+                    child: DatabaseImportCard(
+                      controller: _importController,
+                      onImported: _refreshSearchControllers,
+                    ),
+                  ),
+                );
+              }
+              return DatabaseOpenErrorView(
+                error: snapshot.error!,
+                onRetry: _refreshSearchControllers,
+                onManageDatabase: () => _openDrawerItem('database'),
+              );
+            },
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const Center(child: Text('تعذر تهيئة البحث.'));
         }
 
         final controllers = snapshot.data!;
@@ -198,6 +241,7 @@ class _HomePageState extends State<HomePage> {
                   animation: Listenable.merge([
                     _importController,
                     widget.settingsController,
+                    controllers.number,
                   ]),
                   builder: (context, _) {
                     if (!widget.settingsController.showDatabaseOnHome) {

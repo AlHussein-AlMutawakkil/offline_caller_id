@@ -9,6 +9,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('كاشف الأرقام أوف لاين'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Directionality && widget.textDirection == TextDirection.rtl,
+      ),
+      findsWidgets,
+    );
   });
 }

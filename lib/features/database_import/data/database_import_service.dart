@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/constants/database_constants.dart';
@@ -12,14 +13,20 @@ class DatabaseImportProgress {
   final int copiedBytes;
   final int totalBytes;
   final String message;
+  final double? progressOverride;
 
   const DatabaseImportProgress({
     required this.copiedBytes,
     required this.totalBytes,
     required this.message,
+    this.progressOverride,
   });
 
-  double get percentage => totalBytes == 0 ? 0 : copiedBytes / totalBytes;
+  double get percentage {
+    final value = progressOverride ??
+        (totalBytes == 0 ? 0 : copiedBytes / totalBytes);
+    return value.clamp(0.0, 1.0).toDouble();
+  }
 }
 
 class DatabaseImportService {
@@ -51,6 +58,30 @@ class DatabaseImportService {
     return File(selectedPath);
   }
 
+  /// ينظف النسخة التي قد ينشئها file_picker في Cache على Android.
+  /// يستدعى فقط بعد انتهاء استخدام الملف المختار بالكامل.
+  Future<void> clearPickerTemporaryFiles(File? selectedFile) async {
+    try {
+      await FilePicker.platform.clearTemporaryFiles();
+    } catch (_) {
+      // تنظيف Cache لا يجب أن يحول استيرادًا ناجحًا إلى فشل.
+    }
+
+    // بعض أجهزة Android تبقي الملف المنسوخ في Cache رغم استدعاء الإضافة.
+    // نحذف فقط المسار الواقع داخل Cache التطبيق، وليس الملف الأصلي المختار.
+    if (selectedFile == null || !await selectedFile.exists()) return;
+    try {
+      final cacheDirectory = await getTemporaryDirectory();
+      final isCachedCopy = path.isWithin(
+        cacheDirectory.path,
+        selectedFile.path,
+      );
+      if (isCachedCopy) await selectedFile.delete();
+    } catch (_) {
+      // لا نؤثر في نتيجة الاستيراد إن تعذر تنظيف Cache.
+    }
+  }
+
   Future<void> deleteImportedDatabase() async {
     await closeCurrentDatabase();
     final databaseDirectory = await getDatabasesPath();
@@ -63,6 +94,42 @@ class DatabaseImportService {
     for (final fileName in fileNames) {
       final file = File(path.join(databaseDirectory, fileName));
       if (await file.exists()) await file.delete();
+    }
+  }
+
+  /// يستعيد آخر قاعدة سليمة عند توقف التطبيق وسط عملية الاستبدال.
+  Future<void> recoverInterruptedImport() async {
+    final directory = await getDatabasesPath();
+    final targetFile = File(path.join(directory, DatabaseConstants.databaseName));
+    final markerFile = File('${targetFile.path}.ready');
+    final backupFile = File('${targetFile.path}.backup');
+    final temporaryFile = File('${targetFile.path}.importing');
+
+    if (await temporaryFile.exists()) await temporaryFile.delete();
+
+    if (!await targetFile.exists() && await backupFile.exists()) {
+      await backupFile.rename(targetFile.path);
+    }
+
+    if (!await targetFile.exists()) {
+      if (await markerFile.exists()) await markerFile.delete();
+      return;
+    }
+
+    try {
+      await _validateDatabase(targetFile.path);
+      if (!await markerFile.exists()) {
+        await markerFile.writeAsString(DateTime.now().toIso8601String());
+      }
+      if (await backupFile.exists()) await backupFile.delete();
+    } catch (_) {
+      if (await backupFile.exists()) {
+        await targetFile.delete();
+        await backupFile.rename(targetFile.path);
+        await markerFile.writeAsString(DateTime.now().toIso8601String());
+      } else if (await markerFile.exists()) {
+        await markerFile.delete();
+      }
     }
   }
 
@@ -121,8 +188,10 @@ class DatabaseImportService {
       copiedBytes: 0,
       totalBytes: sourceLength,
       message: 'جاري نسخ قاعدة البيانات...',
+      progressOverride: 0,
     );
 
+    var stage = 'نسخ الملف إلى مساحة التطبيق';
     try {
       yield* _copyWithProgress(
         sourceFile: sourceFile,
@@ -134,24 +203,61 @@ class DatabaseImportService {
         copiedBytes: sourceLength,
         totalBytes: sourceLength,
         message: 'تم النسخ، جاري التحقق من القاعدة...',
+        progressOverride: 0.84,
       );
+      await Future<void>.delayed(const Duration(milliseconds: 16));
 
+      stage = 'التحقق من مخطط قاعدة البيانات';
+      yield DatabaseImportProgress(
+        copiedBytes: sourceLength,
+        totalBytes: sourceLength,
+        message: 'جاري التحقق من مخطط قاعدة البيانات...',
+        progressOverride: 0.88,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 16));
       await _validateDatabase(temporaryPath);
+      stage = 'تثبيت قاعدة البيانات';
+      yield DatabaseImportProgress(
+        copiedBytes: sourceLength,
+        totalBytes: sourceLength,
+        message: 'تم التحقق، جاري تثبيت القاعدة داخل بيانات التطبيق...',
+        progressOverride: 0.94,
+      );
       await closeCurrentDatabase();
 
       if (await backupFile.exists()) await backupFile.delete();
-      if (await targetFile.exists()) await targetFile.rename(backupPath);
-      await temporaryFile.rename(targetPath);
-      await markerFile.writeAsString(DateTime.now().toIso8601String());
+      var originalMovedToBackup = false;
+      try {
+        if (await targetFile.exists()) {
+          await targetFile.rename(backupPath);
+          originalMovedToBackup = true;
+        }
+        if (await markerFile.exists()) await markerFile.delete();
+        await temporaryFile.rename(targetPath);
+        await markerFile.writeAsString(DateTime.now().toIso8601String());
+        if (await backupFile.exists()) await backupFile.delete();
+      } catch (error) {
+        if (await targetFile.exists() && originalMovedToBackup) {
+          await targetFile.delete();
+        }
+        if (originalMovedToBackup && await backupFile.exists()) {
+          await backupFile.rename(targetPath);
+          await markerFile.writeAsString(DateTime.now().toIso8601String());
+        }
+        rethrow;
+      }
 
       yield DatabaseImportProgress(
         copiedBytes: sourceLength,
         totalBytes: sourceLength,
         message: 'تم استيراد قاعدة البيانات بنجاح.',
+        progressOverride: 1,
       );
     } catch (error) {
       if (await temporaryFile.exists()) await temporaryFile.delete();
-      throw DatabaseImportException('فشل استيراد قاعدة البيانات: $error');
+      throw DatabaseImportException(
+        'فشل الاستيراد في مرحلة «$stage»: $error',
+      );
     }
   }
 
@@ -183,6 +289,7 @@ class DatabaseImportService {
             copiedBytes: copiedBytes,
             totalBytes: totalBytes,
             message: 'جاري نسخ قاعدة البيانات...',
+            progressOverride: 0.8 * copiedBytes / totalBytes,
           );
         }
       }
@@ -196,34 +303,38 @@ class DatabaseImportService {
     Database? database;
     try {
       database = await openDatabase(databasePath, readOnly: true);
-      final tables = await database.rawQuery(
+      await _validateSchema(database);
+    } finally {
+      await database?.close();
+    }
+  }
+
+  Future<void> _validateSchema(Database database) async {
+    final tables = await database.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
         [DatabaseConstants.tableName],
       );
-      if (tables.isEmpty) {
-        throw const DatabaseImportException(
-          'القاعدة لا تحتوي على جدول الأرقام المطلوب.',
-        );
-      }
-
-      final columns = await database.rawQuery(
-        'PRAGMA table_info(${DatabaseConstants.tableName})',
+    if (tables.isEmpty) {
+      throw const DatabaseImportException(
+        'القاعدة لا تحتوي على جدول الأرقام المطلوب.',
       );
-      final names = columns
-          .map((column) => column['name']?.toString())
-          .whereType<String>()
-          .toSet();
-      final required = {
-        DatabaseConstants.phoneColumn,
-        DatabaseConstants.namesColumn,
-      };
-      if (!required.every(names.contains)) {
-        throw const DatabaseImportException(
-          'مخطط قاعدة البيانات غير متوافق مع التطبيق.',
-        );
-      }
-    } finally {
-      await database?.close();
+    }
+
+    final columns = await database.rawQuery(
+      'PRAGMA table_info(${DatabaseConstants.tableName})',
+    );
+    final names = columns
+        .map((column) => column['name']?.toString())
+        .whereType<String>()
+        .toSet();
+    final required = {
+      DatabaseConstants.phoneColumn,
+      DatabaseConstants.namesColumn,
+    };
+    if (!required.every(names.contains)) {
+      throw const DatabaseImportException(
+        'مخطط قاعدة البيانات غير متوافق مع التطبيق.',
+      );
     }
   }
 }

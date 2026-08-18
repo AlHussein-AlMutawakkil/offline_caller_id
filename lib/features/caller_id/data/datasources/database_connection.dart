@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:path/path.dart' as path;
 import 'package:sqflite/sqflite.dart';
 
 import '../../../../core/constants/database_constants.dart';
+import '../../../../core/errors/database_unavailable_exception.dart';
 
 class DatabaseConnection {
   Database? _database;
@@ -16,35 +19,21 @@ class DatabaseConnection {
       DatabaseConstants.databaseName,
     );
 
-    _database = await openDatabase(
-      databasePath,
-      version: DatabaseConstants.databaseVersion,
-      onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS ${DatabaseConstants.tableName} (
-            ${DatabaseConstants.idColumn} INTEGER PRIMARY KEY AUTOINCREMENT,
-            ${DatabaseConstants.phoneColumn} TEXT NOT NULL,
-            ${DatabaseConstants.namesColumn} TEXT NOT NULL,
-            ${DatabaseConstants.companyColumn} TEXT
-          )
-        ''');
-        await _ensureIndexes(db);
-      },
-      onOpen: _ensureIndexes,
-    );
+    final databaseFile = File(databasePath);
+    final markerFile = File('$databasePath.ready');
+    if (!await databaseFile.exists() || !await markerFile.exists()) {
+      throw const DatabaseUnavailableException(
+        'لا توجد قاعدة أرقام جاهزة. استورد ملف SQLite من إدارة قاعدة البيانات.',
+      );
+    }
+
+    try {
+      _database = await openDatabase(databasePath, readOnly: true);
+    } catch (error) {
+      throw DatabaseUnavailableException('تعذر فتح قاعدة الأرقام: $error');
+    }
 
     return _database!;
-  }
-
-  Future<void> _ensureIndexes(Database db) async {
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_${DatabaseConstants.tableName}_phone
-      ON ${DatabaseConstants.tableName} (${DatabaseConstants.phoneColumn})
-    ''');
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_${DatabaseConstants.tableName}_names
-      ON ${DatabaseConstants.tableName} (${DatabaseConstants.namesColumn})
-    ''');
   }
 
   Future<void> close() async {

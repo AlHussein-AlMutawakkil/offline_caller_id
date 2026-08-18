@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../app_settings_controller.dart';
+
 class PermissionsPage extends StatefulWidget {
-  const PermissionsPage({super.key});
+  final AppSettingsController settingsController;
+
+  const PermissionsPage({required this.settingsController, super.key});
 
   @override
   State<PermissionsPage> createState() => _PermissionsPageState();
@@ -68,6 +72,7 @@ class _PermissionsPageState extends State<PermissionsPage> {
       await item.permission.request();
     }
     await _refreshStatuses();
+    await widget.settingsController.syncCallMonitorService();
   }
 
   @override

@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
+
 import '../../data/datasources/caller_database_datasource.dart';
 import '../../data/repositories/caller_id_repository_impl.dart';
 import '../../domain/entities/contact_record.dart';
 import '../../domain/usecases/search_caller.dart';
 
-class NumberSearchController {
+class NumberSearchController extends ChangeNotifier {
   final SearchByNumber _searchByNumber;
   final CountCallerRecords _countCallerRecords;
 
@@ -25,6 +27,8 @@ class NumberSearchController {
       totalRecords = await _countCallerRecords();
     } catch (error) {
       errorMessage = error.toString();
+    } finally {
+      notifyListeners();
     }
   }
 
@@ -35,6 +39,7 @@ class NumberSearchController {
     final requestId = ++_requestId;
     isLoading = true;
     errorMessage = null;
+    notifyListeners();
 
     try {
       final data = await _searchByNumber(value);
@@ -43,6 +48,7 @@ class NumberSearchController {
       if (requestId == _requestId) errorMessage = error.toString();
     } finally {
       if (requestId == _requestId) isLoading = false;
+      if (requestId == _requestId) notifyListeners();
     }
   }
 }

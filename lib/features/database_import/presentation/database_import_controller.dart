@@ -18,11 +18,20 @@ class DatabaseImportController extends ChangeNotifier {
 
   Future<void> initialize() async {
     try {
+      await service.clearPickerTemporaryFiles(null);
+      await service.recoverInterruptedImport();
       hasImportedDatabase = await service.hasImportedDatabase();
       if (hasImportedDatabase) statusMessage = 'قاعدة البيانات جاهزة';
     } catch (_) {
       hasImportedDatabase = false;
     }
+    notifyListeners();
+  }
+
+  Future<void> clearTemporaryFiles() async {
+    if (isImporting) return;
+    await service.clearPickerTemporaryFiles(null);
+    statusMessage = 'تم طلب تنظيف الملفات المؤقتة';
     notifyListeners();
   }
 
@@ -41,7 +50,7 @@ class DatabaseImportController extends ChangeNotifier {
     if (isImporting) return false;
 
     isImporting = true;
-    statusMessage = 'جاري فتح مدير الملفات...';
+    statusMessage = 'جاري فتح مدير الملفات. قد يجهز Android نسخة مؤقتة قبل بدء النسخ الداخلي...';
     notifyListeners();
 
     try {
@@ -53,7 +62,7 @@ class DatabaseImportController extends ChangeNotifier {
 
       selectedFile = file;
       selectedFileSize = await file.length();
-      statusMessage = 'جاري بدء نسخ قاعدة البيانات...';
+      statusMessage = 'تم اختيار الملف. جاري نسخ قاعدة البيانات إلى مساحة التطبيق...';
       notifyListeners();
 
       await for (final update in service.importFile(file)) {
@@ -69,6 +78,7 @@ class DatabaseImportController extends ChangeNotifier {
       statusMessage = error.toString();
       return false;
     } finally {
+      await service.clearPickerTemporaryFiles(selectedFile);
       isImporting = false;
       notifyListeners();
     }
