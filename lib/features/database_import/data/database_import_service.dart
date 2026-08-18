@@ -29,13 +29,25 @@ class DatabaseImportService {
 
   Future<File?> pickDatabaseFile() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['db', 'sqlite', 'sqlite3'],
+      type: FileType.any,
       withData: false,
     );
 
     final selectedPath = result?.files.single.path;
     if (selectedPath == null || selectedPath.isEmpty) return null;
+
+    final fileName = path.basename(selectedPath).toLowerCase();
+    final extension = path.extension(fileName);
+    const supportedExtensions = {'.db', '.sqlite', '.sqlite3'};
+    final isSupported = supportedExtensions.contains(extension) ||
+        fileName.contains('contactsdb');
+
+    if (!isSupported) {
+      throw const DatabaseImportException(
+        'اختر ملف SQLite بامتداد .db أو .sqlite أو .sqlite3.',
+      );
+    }
+
     return File(selectedPath);
   }
 
